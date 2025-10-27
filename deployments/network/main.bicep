@@ -110,7 +110,7 @@ var fw_subnet = {
 }
 
 /// ---- Firewall VNET config
-module calcAzFwIp '../../modules/networking/firewall/calcAzFwIp.bicep' = if (azureFirewalls) {
+module calcAzFwIp '../../modules/networking/firewall/calcAzFwip.bicep' = if (azureFirewalls) {
   name: take('${deployment().name}-calcAzFwIp', 64)
   params: {
     vnetFirewallSubnetAddressPrefix: vnetFirewallSubnetAddressPrefix

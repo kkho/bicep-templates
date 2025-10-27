@@ -52,14 +52,21 @@ jobs:
       - name: Build and Validate Bicep Templates
         shell: bash
         run: |
-          echo "Building Bicep templates..."
-
+          echo "🔨 Building Bicep templates..."
+          echo "Current working directory: $(pwd)"
+          echo "Repository structure:"
+          ls -la
+          
           # Create output directory
           mkdir -p bicep-compiled
 
           # Build main deployment template
           echo "Building main deployment template..."
           az bicep build --file deployments/main.bicep --outdir bicep-compiled
+
+          # Build network deployment template
+          echo "Building network deployment template..."
+          az bicep build --file deployments/network/main.bicep --outdir bicep-compiled/deployments/network
 
           # Build all module templates
           echo "Building module templates..."
