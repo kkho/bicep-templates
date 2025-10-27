@@ -1,0 +1,6 @@
+{
+  "name": "Azure Container Registry",
+  "description": "Secure ACR with private endpoints",
+  "cost": "Medium",
+  "complexity": "Intermediate"
+}

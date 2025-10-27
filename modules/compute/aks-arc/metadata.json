@@ -1,0 +1,20 @@
+{
+  "$schema": "https://aka.ms/azure-quickstart-templates-metadata-schema#",
+  "type": "QuickStart",
+  "itemDisplayName": "Azure Kubernetes Service (AKS) Cluster on Azure Arc",
+  "description": "Creates an Azure Kubernetes Service (AKS) cluster won Azure Arc",
+  "summary": "Deploy a production-ready AKS cluster with auto-scaling, monitoring, and RBAC enabled",
+  "githubUsername": "kkho",
+  "dateUpdated": "2025-10-20",
+  "environments": [
+    "AzureCloud",
+    "AzureUSGovernment"
+  ],
+  "tags": {
+    "subscriptiontype": "Azure4Student, Pay-As-You-Go, Enterprise Agreement",
+    "resource": "AKS, Kubernetes, Container, Compute",
+    "level": "intermediate",
+    "cost": "$$"
+  },
+  "validationType": "Manual"
+}
