@@ -136,7 +136,7 @@ resource vnet_udr 'Microsoft.Network/routeTables@2024-10-01' = if (azureFirewall
         properties: {
           addressPrefix: '0.0.0.0/0'
           nextHopType: 'VirtualAppliance'
-          nextHopIpAddress: azureFirewalls ? calcAzFwIp.outputs.FirewallPrivateIp : null
+          nextHopIpAddress: azureFirewalls ? calcAzFwIp.outputs.firewallPrivateIp : null
         }
       }
     ]

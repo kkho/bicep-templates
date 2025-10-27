@@ -7,4 +7,4 @@ param vnetFirewallSubnetAddressPrefix string
 var subnetOctets = split(vnetFirewallSubnetAddressPrefix, '.')
 var hostIdOctet = '4'
 
-output FirewallPrivateIp string = '${subnetOctets[0]}.${subnetOctets[1]}.${subnetOctets[2]}.${hostIdOctet}'
+output firewallPrivateIp string = '${subnetOctets[0]}.${subnetOctets[1]}.${subnetOctets[2]}.${hostIdOctet}'
