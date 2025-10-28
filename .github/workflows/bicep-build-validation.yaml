@@ -40,7 +40,7 @@ jobs:
           echo "Linting Bicep templates..."
           # Lint main deployment template
           echo "Linting main deployment template..."
-          az bicep lint --file deployments/main.bicep
+          az bicep lint --file deployments/aks/main.bicep
 
           # Find and lint all module templates
           echo "Linting module templates..."
@@ -56,13 +56,13 @@ jobs:
           echo "Current working directory: $(pwd)"
           echo "Repository structure:"
           ls -la
-          
+
           # Create output directory
           mkdir -p bicep-compiled
 
           # Build main deployment template
           echo "Building main deployment template..."
-          az bicep build --file deployments/main.bicep --outdir bicep-compiled
+          az bicep build --file deployments/aks/main.bicep --outdir bicep-compiled
 
           # Build network deployment template
           echo "Building network deployment template..."

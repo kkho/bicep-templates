@@ -107,7 +107,12 @@ Main deployment templates and orchestrators:
 
 - `main.bicep` - Complete Azure platform deployment
 - `network/` - Networking infrastructure
-- `aks/` - Kubernetes cluster configurations
+- `aks/` - **Production-ready AKS cluster (see `deployments/aks/main.bicep`)**
+
+> **Note:**
+>
+> - The AKS solution now uses only three add-on modules from `modules/compute/aks/`: `aksdapr.bicep`, `aksfluxaddon.bicep`, and `akspolicies.bicep`.
+> - All other legacy AKS modules in `modules/compute/aks/` are deprecated and can be deleted unless referenced elsewhere.
 
 ### Solution Examples
 
@@ -147,8 +152,6 @@ Ready-to-deploy solution architectures with different complexity levels:
 - Network Security Groups with flow logs
 
 **Use case:** Secure foundation for Azure workloads
-
-## Module Usage Examples
 
 ### Deploy Individual Modules
 
