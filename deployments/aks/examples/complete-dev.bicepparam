@@ -62,6 +62,44 @@ param enablePrivateEndpoints = false
 param enableNetworkSecurityGroups = false
 param enableSysLogCollection = false
 
+// ============ ADVANCED SECURITY (OPTIONAL FOR DEV) ============
+param enableAzureDefender = false // Enable for production
+param enableEtcdEncryption = false // Enable for production with Key Vault
+param etcdEncryptionKeyName = 'etcd-encryption-key'
+param enableOpenServiceMesh = false
+
+// ============ OBSERVABILITY (OPTIONAL FOR DEV) ============
+param enablePrometheus = false // Enable for production monitoring
+param enableGrafana = false // Enable for production dashboards
+
+// ============ WORKLOAD ISOLATION & BACKUP (OPTIONAL FOR DEV) ============
+param enableProductionUserNodePools = false // Enable for production workload isolation
+param productionUserNodePoolCount = 2 // Number of user node pools
+param enableBackupPreparation = false // Enable to prepare backup storage
+param backupResourceGroupName = '' // RG for backup storage
+param enableCustomPolicyInitiatives = false // Enable for custom governance
+param customPolicyInitiativeIds = [] // Array of custom policy definition IDs
+
+// ============ SSL/TLS CERTIFICATES (OPTIONAL) ============
+param enableSslCertificate = false // Enable HTTPS with Key Vault certificate
+param sslCertificateKeyVaultName = '' // Key Vault name with SSL certificate
+param sslCertificateSecretName = '' // Certificate secret name in Key Vault
+param sslCustomDomain = '' // Custom domain (e.g., 'www.mycompany.com')
+
+// ============ SSH ACCESS (OPTIONAL) ============
+param enableSshAccess = false // Enable SSH access to AKS nodes
+param sshPublicKey = '' // SSH public key (generate with: ssh-keygen -t rsa -b 4096)
+param aksAdminUsername = 'azureuser' // Admin username for nodes
+
+// ============ DNS RECORDS (OPTIONAL) ============
+param enableDnsARecord = false // Create DNS A record for App Gateway
+param dnsARecordName = 'www' // DNS record name (e.g., 'www', 'api', '@')
+
+// ============ CERTIFICATE AUTOMATION (OPTIONAL) ============
+param enableCertManager = false // Install cert-manager for Let's Encrypt
+param certManagerEmail = '' // Email for Let's Encrypt notifications
+param letsEncryptEnvironment = 'staging' // 'staging' or 'production'
+
 // ============ NETWORKING CONFIGURATION ============
 // Customize these CIDR ranges for your environment
 param vnetAddressPrefix = '10.240.0.0/16'
@@ -95,6 +133,11 @@ ADDITIONAL ENTERPRISE COMPONENTS:
 - Network Security Groups: Set enableNetworkSecurityGroups=true for subnet-level protection
 - SysLog Collection: Set enableSysLogCollection=true for advanced monitoring
 
+PRODUCTION ENHANCEMENTS:
+- Workload Isolation: Set enableProductionUserNodePools=true for dedicated node pools
+- Backup & DR: Set enableBackupPreparation=true to prepare Velero-compatible storage
+- Custom Governance: Set enableCustomPolicyInitiatives=true with customPolicyInitiativeIds
+
 PRODUCTION RECOMMENDATIONS:
 - enablePrivateCluster=true
 - enableKeyVault=true
@@ -103,10 +146,12 @@ PRODUCTION RECOMMENDATIONS:
 - enablePrivateEndpoints=true for enterprise security
 - enableNetworkSecurityGroups=true for defense in depth
 - enableAutomation=true for cost optimization
+- enableProductionUserNodePools=true for workload isolation
+- enableBackupPreparation=true for disaster recovery readiness
 
 EXAMPLE FULL ENTERPRISE DEPLOYMENT:
 Set all enable* parameters to true for complete enterprise-grade infrastructure
-with maximum security, monitoring, and automation capabilities.
+with maximum security, monitoring, automation, and operational excellence capabilities.
 */
 
 // Optional advanced/enterprise features
@@ -118,6 +163,6 @@ param enableByoSubnetRbac = false
 param byoAKSSubnetId = ''
 param byoAKSPodSubnetId = ''
 param byoSubnetPrincipalId = ''
-param enableFastAlertingRole = false
+param enableFastAlertingRole = true // Enabled by default for monitoring
 param fastAlertingLawName = ''
 param enableTelemetry = true

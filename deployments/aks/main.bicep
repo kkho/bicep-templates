@@ -76,6 +76,44 @@ param enableDnsZone bool = false
 @description('DNS zone name (e.g., mycompany.com)')
 param dnsZoneName string = ''
 
+@description('Create DNS A record for Application Gateway')
+param enableDnsARecord bool = false
+
+@description('DNS A record name (e.g., www, api, or @ for root domain)')
+param dnsARecordName string = 'www'
+
+@description('Enable SSL/TLS certificate for Application Gateway')
+param enableSslCertificate bool = false
+
+@description('Key Vault name containing SSL certificate (must already exist)')
+param sslCertificateKeyVaultName string = ''
+
+@description('SSL certificate secret name in Key Vault')
+param sslCertificateSecretName string = ''
+
+@description('Custom domain for SSL certificate (e.g., www.mycompany.com)')
+param sslCustomDomain string = ''
+
+@description('Enable SSH access to AKS nodes')
+param enableSshAccess bool = false
+
+@description('SSH public key for AKS node access')
+@secure()
+param sshPublicKey string = ''
+
+@description('Admin username for AKS nodes')
+param aksAdminUsername string = 'azureuser'
+
+@description('Enable cert-manager for automatic certificate management')
+param enableCertManager bool = false
+
+@description('Email for Let\'s Encrypt certificate notifications')
+param certManagerEmail string = ''
+
+@description('Let\'s Encrypt environment (staging or production)')
+@allowed(['staging', 'production'])
+param letsEncryptEnvironment string = 'staging'
+
 @description('Create an Azure Firewall for network security')
 param enableFirewall bool = false
 
@@ -122,6 +160,24 @@ param enableNetworkSecurityGroups bool = false
 @description('Enable SysLog collection for advanced monitoring')
 param enableSysLogCollection bool = false
 
+@description('Enable Azure Managed Prometheus monitoring')
+param enablePrometheus bool = false
+
+@description('Enable Azure Managed Grafana dashboard')
+param enableGrafana bool = false
+
+@description('Enable Open Service Mesh (OSM) add-on')
+param enableOpenServiceMesh bool = false
+
+@description('Enable Azure Defender for Containers')
+param enableAzureDefender bool = false
+
+@description('Enable etcd encryption with Key Vault KMS')
+param enableEtcdEncryption bool = false
+
+@description('Key Vault key name for etcd encryption (required if enableEtcdEncryption is true)')
+param etcdEncryptionKeyName string = 'etcd-encryption-key'
+
 // AKS Add-ons and Extensions Configuration
 @description('Enable Azure Blob CSI driver')
 param enableBlobCSIDriver bool = true
@@ -153,6 +209,28 @@ param enableAzurePolicy bool = true
 @allowed(['Baseline', 'Restricted'])
 @description('Azure Policy initiative')
 param azurePolicyInitiative string = 'Baseline'
+
+@description('Enable custom Azure Policy initiatives')
+param enableCustomPolicyInitiatives bool = false
+
+@description('Custom policy initiative definition IDs')
+param customPolicyInitiativeIds array = []
+
+// Backup and DR Configuration
+@description('Enable preparation for backup and disaster recovery (installs CSI snapshot controller)')
+param enableBackupPreparation bool = false
+
+@description('Resource group for backup storage')
+param backupResourceGroupName string = ''
+
+// User Node Pool Configuration
+@description('Enable production user node pools for workload isolation')
+param enableProductionUserNodePools bool = false
+
+@description('Number of production user node pools to create')
+@minValue(1)
+@maxValue(5)
+param productionUserNodePoolCount int = 2
 
 // Automation timing parameter
 @description('Base time for scheduling automation tasks')
@@ -267,6 +345,20 @@ module dnsZone 'br/public:avm/res/network/dns-zone:0.2.0' = if (enableDnsZone &&
   }
 }
 
+// 2a. DNS A Record for Application Gateway
+resource dnsARecord 'Microsoft.Network/dnsZones/A@2018-05-01' = if (enableDnsARecord && enableApplicationGateway && enableDnsZone && !empty(dnsZoneName)) {
+  name: '${dnsZoneName}/${dnsARecordName}'
+  properties: {
+    TTL: 3600
+    targetResource: {
+      id: appGwPublicIp!.outputs.resourceId
+    }
+  }
+  dependsOn: [
+    dnsZone
+  ]
+}
+
 // 8. Monitoring - Observability Platform
 module logAnalytics 'br/public:avm/res/operational-insights/workspace:0.7.0' = if (enableMonitoring) {
   name: 'law-deployment'
@@ -293,6 +385,11 @@ module acr 'br/public:avm/res/container-registry/registry:0.4.0' = {
     publicNetworkAccess: 'Disabled'
     networkRuleBypassOptions: 'AzureServices'
     zoneRedundancy: (acrSku == 'Premium') ? 'Enabled' : 'Disabled'
+    // Enable vulnerability scanning and content trust for Premium SKU
+    quarantinePolicyStatus: (acrSku == 'Premium') ? 'enabled' : 'disabled'
+    trustPolicyStatus: (acrSku == 'Premium') ? 'enabled' : 'disabled'
+    retentionPolicyStatus: (acrSku == 'Premium') ? 'enabled' : 'disabled'
+    retentionPolicyDays: 30
     tags: {
       Environment: 'Infrastructure'
       Purpose: 'Container Images'
@@ -365,6 +462,41 @@ module firewall 'br/public:avm/res/network/azure-firewall:0.3.0' = if (enableFir
 }
 
 // 6. Application Gateway Components (if enabled)
+// 6a. Managed Identity for Application Gateway (SSL Certificate Access)
+module appGwManagedIdentity 'br/public:avm/res/managed-identity/user-assigned-identity:0.4.0' = if (enableApplicationGateway && enableSslCertificate && !empty(sslCertificateKeyVaultName)) {
+  name: 'appgw-identity-deployment'
+  params: {
+    name: 'id-appgw-${resourceName}'
+    location: location
+    tags: {
+      Environment: 'Infrastructure'
+      Purpose: 'Application Gateway Identity'
+    }
+  }
+}
+
+// 6b. Key Vault Access Policy for Application Gateway
+resource keyVaultAccessPolicy 'Microsoft.KeyVault/vaults/accessPolicies@2025-05-01' = if (enableApplicationGateway && enableSslCertificate && !empty(sslCertificateKeyVaultName)) {
+  name: '${sslCertificateKeyVaultName}/add'
+  properties: {
+    accessPolicies: [
+      {
+        tenantId: subscription().tenantId
+        objectId: appGwManagedIdentity!.outputs.principalId
+        permissions: {
+          secrets: [
+            'get'
+          ]
+          certificates: [
+            'get'
+          ]
+        }
+      }
+    ]
+  }
+}
+
+// 6c. Application Gateway Public IP
 module appGwPublicIp 'br/public:avm/res/network/public-ip-address:0.6.0' = if (enableApplicationGateway) {
   name: 'appgw-pip-deployment'
   params: {
@@ -387,6 +519,16 @@ module applicationGateway 'br/public:avm/res/network/application-gateway:0.3.0' 
     location: location
     sku: applicationGatewaySku
     capacity: 2
+
+    // Managed Identity for Key Vault certificate access
+    managedIdentities: enableSslCertificate && !empty(sslCertificateKeyVaultName)
+      ? {
+          userAssignedResourceIds: [
+            appGwManagedIdentity!.outputs.resourceId
+          ]
+        }
+      : {}
+
     gatewayIPConfigurations: [
       {
         name: 'appGatewayIpConfig'
@@ -409,6 +551,17 @@ module applicationGateway 'br/public:avm/res/network/application-gateway:0.3.0' 
         port: 443
       }
     ]
+
+    // SSL Certificates from Key Vault
+    sslCertificates: enableSslCertificate && !empty(sslCertificateKeyVaultName) && !empty(sslCertificateSecretName)
+      ? [
+          {
+            name: 'sslCertificate'
+            keyVaultSecretId: 'https://${sslCertificateKeyVaultName}${environment().suffixes.keyvaultDns}/secrets/${sslCertificateSecretName}'
+          }
+        ]
+      : []
+
     backendAddressPools: [
       {
         name: 'defaultPool'
@@ -421,30 +574,99 @@ module applicationGateway 'br/public:avm/res/network/application-gateway:0.3.0' 
         protocol: 'Http'
         cookieBasedAffinity: 'Disabled'
       }
-    ]
-    httpListeners: [
       {
-        name: 'defaultListener'
-        frontendIPConfigurationName: 'appGwPublicFrontendIp'
-        frontendPortName: 'port80'
-        protocol: 'Http'
+        name: 'httpsBackendSetting'
+        port: 443
+        protocol: 'Https'
+        cookieBasedAffinity: 'Disabled'
       }
     ]
-    requestRoutingRules: [
-      {
-        name: 'defaultRule'
-        ruleType: 'Basic'
-        httpListenerName: 'defaultListener'
-        backendAddressPoolName: 'defaultPool'
-        backendHttpSettingsName: 'defaultHttpSetting'
-        priority: 1
-      }
-    ]
+
+    // HTTP and HTTPS Listeners
+    httpListeners: enableSslCertificate && !empty(sslCertificateKeyVaultName)
+      ? [
+          {
+            name: 'httpListener'
+            frontendIPConfigurationName: 'appGwPublicFrontendIp'
+            frontendPortName: 'port80'
+            protocol: 'Http'
+          }
+          {
+            name: 'httpsListener'
+            frontendIPConfigurationName: 'appGwPublicFrontendIp'
+            frontendPortName: 'port443'
+            protocol: 'Https'
+            sslCertificateName: 'sslCertificate'
+            hostName: !empty(sslCustomDomain) ? sslCustomDomain : null
+          }
+        ]
+      : [
+          {
+            name: 'defaultListener'
+            frontendIPConfigurationName: 'appGwPublicFrontendIp'
+            frontendPortName: 'port80'
+            protocol: 'Http'
+          }
+        ]
+
+    // Routing Rules
+    requestRoutingRules: enableSslCertificate && !empty(sslCertificateKeyVaultName)
+      ? [
+          {
+            name: 'httpRedirectRule'
+            ruleType: 'Basic'
+            httpListenerName: 'httpListener'
+            redirectConfigurationName: 'httpToHttpsRedirect'
+            priority: 1
+          }
+          {
+            name: 'httpsRule'
+            ruleType: 'Basic'
+            httpListenerName: 'httpsListener'
+            backendAddressPoolName: 'defaultPool'
+            backendHttpSettingsName: 'defaultHttpSetting'
+            priority: 2
+          }
+        ]
+      : [
+          {
+            name: 'defaultRule'
+            ruleType: 'Basic'
+            httpListenerName: 'defaultListener'
+            backendAddressPoolName: 'defaultPool'
+            backendHttpSettingsName: 'defaultHttpSetting'
+            priority: 1
+          }
+        ]
+
+    // HTTP to HTTPS Redirect
+    redirectConfigurations: enableSslCertificate && !empty(sslCertificateKeyVaultName)
+      ? [
+          {
+            name: 'httpToHttpsRedirect'
+            redirectType: 'Permanent'
+            targetListenerName: 'httpsListener'
+            includePath: true
+            includeQueryString: true
+          }
+        ]
+      : []
+
+    // SSL Policy (using supported properties)
+    sslPolicyType: enableSslCertificate ? 'Predefined' : null
+    sslPolicyName: enableSslCertificate ? 'AppGwSslPolicy20220101S' : null
+
     tags: {
       Environment: 'Infrastructure'
       Purpose: 'Load Balancer'
     }
   }
+  dependsOn: enableSslCertificate
+    ? [
+        appGwManagedIdentity
+        keyVaultAccessPolicy
+      ]
+    : []
 }
 
 // 7. AKS Cluster - The Heart of the Platform
@@ -491,15 +713,94 @@ module aksCluster 'br/public:avm/res/container-service/managed-cluster:0.3.0' = 
     aadProfileAdminGroupObjectIDs: adminGroupObjectIds
     disableLocalAccounts: enableAzureAD
 
+    // SSH Access to Nodes
+    sshPublicKey: enableSshAccess && !empty(sshPublicKey) ? sshPublicKey : null
+    adminUsername: enableSshAccess ? aksAdminUsername : null
+
     // Monitoring and Add-ons
     omsAgentEnabled: enableMonitoring
     azurePolicyEnabled: enableAzurePolicy
     enableKeyvaultSecretsProvider: enableKeyVault
+    enableAzureMonitorProfileMetrics: enablePrometheus // Enables managed Prometheus metrics collection
+    openServiceMeshEnabled: enableOpenServiceMesh
+    enableAzureDefender: enableAzureDefender
+
+    // Security - etcd encryption with Key Vault KMS
+    customerManagedKey: enableEtcdEncryption && enableKeyVault
+      ? {
+          keyVaultResourceId: keyVault!.outputs.resourceId
+          keyName: etcdEncryptionKeyName
+          keyVaultNetworkAccess: 'Public'
+        }
+      : null
+
+    // Diagnostic Settings for AKS Control Plane Logs
+    diagnosticSettings: enableMonitoring
+      ? [
+          {
+            name: 'aks-diagnostics'
+            workspaceResourceId: logAnalytics!.outputs.resourceId
+            logs: [
+              {
+                category: 'kube-apiserver'
+                enabled: true
+              }
+              {
+                category: 'kube-audit'
+                enabled: true
+              }
+              {
+                category: 'kube-audit-admin'
+                enabled: true
+              }
+              {
+                category: 'kube-controller-manager'
+                enabled: true
+              }
+              {
+                category: 'kube-scheduler'
+                enabled: true
+              }
+              {
+                category: 'cluster-autoscaler'
+                enabled: true
+              }
+              {
+                category: 'cloud-controller-manager'
+                enabled: true
+              }
+              {
+                category: 'guard'
+                enabled: true
+              }
+              {
+                category: 'csi-azuredisk-controller'
+                enabled: true
+              }
+              {
+                category: 'csi-azurefile-controller'
+                enabled: true
+              }
+              {
+                category: 'csi-snapshot-controller'
+                enabled: true
+              }
+            ]
+            metrics: [
+              {
+                category: 'AllMetrics'
+                enabled: true
+              }
+            ]
+          }
+        ]
+      : []
 
     // CSI Drivers
     enableStorageProfileBlobCSIDriver: enableBlobCSIDriver
     enableStorageProfileFileCSIDriver: enableFileCSIDriver
     enableStorageProfileDiskCSIDriver: enableDiskCSIDriver
+    enableStorageProfileSnapshotController: enableBackupPreparation // Required for backup/DR
 
     // Additional Add-ons
     webApplicationRoutingEnabled: enableWebAppRouting
@@ -516,6 +817,22 @@ module aksCluster 'br/public:avm/res/container-service/managed-cluster:0.3.0' = 
       Purpose: 'Container Orchestration'
       Template: 'AVM-Simplified'
     }
+  }
+}
+// Azure Managed Grafana (optional)
+resource managedGrafana 'Microsoft.Dashboard/grafana@2024-11-01-preview' = if (enableGrafana) {
+  name: 'grafana-${resourceName}'
+  location: location
+  properties: {
+    publicNetworkAccess: 'Enabled'
+    grafanaIntegrations: {
+      azureMonitorWorkspaceIntegrations: [
+        {
+          azureMonitorWorkspaceResourceId: enableMonitoring ? logAnalytics!.outputs.resourceId : ''
+        }
+      ]
+    }
+    // Optionally configure identity, RBAC, and other integrations here
   }
 }
 
@@ -552,15 +869,49 @@ module aksPolicies '../../modules/compute/aks/akspolicies.bicep' = if (enableAzu
   }
 }
 
+// Custom Azure Policy Initiatives
+resource customPolicyAssignments 'Microsoft.Authorization/policyAssignments@2025-03-01' = [
+  for (policyId, index) in customPolicyInitiativeIds: if (enableCustomPolicyInitiatives && !empty(customPolicyInitiativeIds)) {
+    name: 'custom-policy-${index}'
+    location: location
+    identity: {
+      type: 'SystemAssigned'
+    }
+    properties: {
+      policyDefinitionId: policyId
+      parameters: {}
+      displayName: 'Custom AKS Policy Initiative ${index + 1}'
+      description: 'Custom policy initiative for AKS cluster'
+    }
+    scope: resourceGroup()
+  }
+]
+
 // Metric Alerts for AKS and Log Analytics
 module aksMetricAlerts '../../modules/compute/aks/aksmetricalerts.bicep' = if (enableMonitoring) {
   name: 'aks-metric-alerts'
   params: {
     clusterName: aksCluster.outputs.name
-    logAnalyticsWorkspaceName: logAnalytics.outputs.name
+    logAnalyticsWorkspaceName: logAnalytics!.outputs.name
     logAnalyticsWorkspaceLocation: location
     // You can add more params as needed
   }
+}
+
+// cert-manager Installation via Helm (for automatic certificate management)
+module certManagerDeployment '../../modules/compute/aks/akscertmanager.bicep' = if (enableCertManager && !empty(certManagerEmail)) {
+  name: 'cert-manager-deployment'
+  params: {
+    aksName: aksCluster.outputs.name
+    email: certManagerEmail
+    letsEncryptEnvironment: letsEncryptEnvironment
+    dnsZoneName: enableDnsZone && !empty(dnsZoneName) ? dnsZoneName : ''
+    azureTenantId: subscription().tenantId
+    azureSubscriptionId: subscription().subscriptionId
+  }
+  dependsOn: [
+    dnsZone
+  ]
 }
 
 // Optional: Add custom user node pool (aksagentpool)
@@ -588,6 +939,72 @@ module customUserNodePool '../../modules/compute/aks/aksagentpool.bicep' = if (e
     enableNodePublicIP: false
     spotInstance: false
     autoTaintWindows: false
+  }
+}
+
+// Production User Node Pools for Workload Isolation
+module productionUserNodePools '../../modules/compute/aks/aksagentpool.bicep' = [
+  for i in range(0, productionUserNodePoolCount): if (enableProductionUserNodePools) {
+    name: 'prod-user-nodepool-${i}'
+    params: {
+      aksName: aksCluster.outputs.name
+      poolName: 'userpool${i + 1}'
+      availabilityZones: ['1', '2', '3']
+      osDiskType: 'Managed'
+      agentVMSize: nodeVmSize
+      osDiskSizeGB: 128
+      agentCount: 2
+      agentCountMax: 10
+      maxPods: 50
+      nodeTaints: i == 0 ? [] : ['workload=specialized:NoSchedule'] // First pool no taint, others tainted
+      nodeLabels: {
+        'workload-type': i == 0 ? 'general' : 'specialized'
+        'pool-index': '${i + 1}'
+      }
+      subnetId: '${vnet.outputs.resourceId}/subnets/aks-subnet'
+      osType: 'Linux'
+      osSKU: 'AzureLinux'
+      enableNodePublicIP: false
+      spotInstance: false
+      autoTaintWindows: false
+    }
+  }
+]
+
+// Backup Preparation - Storage Account for Velero/Backup Tools
+resource backupStorageAccount 'Microsoft.Storage/storageAccounts@2025-01-01' = if (enableBackupPreparation) {
+  name: 'stbackup${uniqueString(resourceGroup().id)}'
+  location: location
+  sku: {
+    name: 'Standard_LRS'
+  }
+  kind: 'StorageV2'
+  properties: {
+    accessTier: 'Cool'
+    minimumTlsVersion: 'TLS1_2'
+    supportsHttpsTrafficOnly: true
+    allowBlobPublicAccess: false
+    networkAcls: {
+      defaultAction: 'Deny'
+      bypass: 'AzureServices'
+      virtualNetworkRules: [
+        {
+          id: '${vnet.outputs.resourceId}/subnets/aks-subnet'
+          action: 'Allow'
+        }
+      ]
+    }
+  }
+  tags: {
+    Environment: 'Infrastructure'
+    Purpose: 'AKS Backup and DR'
+  }
+}
+
+resource backupBlobContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2025-01-01' = if (enableBackupPreparation) {
+  name: '${backupStorageAccount.name}/default/aks-backups'
+  properties: {
+    publicAccess: 'None'
   }
 }
 
@@ -627,15 +1044,15 @@ module aksNetContrib '../../modules/compute/aks/asknetcontrib.bicep' = if (enabl
 
 // Optional: Fast alerting role assignment for Log Analytics (aksfastlartingrolelaw)
 @description('Enable Fast Alerting Role Assignment')
-param enableFastAlertingRole bool = false
+param enableFastAlertingRole bool = true
 @description('Log Analytics workspace name for fast alerting')
 param fastAlertingLawName string = ''
-module aksFastAlertingRole '../../modules/compute/aks/aksfastlartingrolelaw.bicep' = if (enableFastAlertingRole) {
+module aksFastAlertingRole '../../modules/compute/aks/aksfastlartingrolelaw.bicep' = if (enableFastAlertingRole && enableMonitoring) {
   name: 'aks-fast-alerting-role'
   params: {
     existingAksName: aksCluster.outputs.name
     createLaw: false
-    aksLawName: fastAlertingLawName
+    aksLawName: !empty(fastAlertingLawName) ? fastAlertingLawName : logAnalytics!.outputs.name
     omsagent: true
   }
 }
@@ -1050,6 +1467,50 @@ output privateEndpointsEnabled bool = enablePrivateEndpoints
 @description('SysLog Collection enabled')
 output sysLogCollectionEnabled bool = enableSysLogCollection
 
+@description('Azure Defender for Containers enabled')
+output azureDefenderEnabled bool = enableAzureDefender
+
+@description('etcd encryption with Key Vault KMS enabled')
+output etcdEncryptionEnabled bool = enableEtcdEncryption
+
+@description('Prometheus monitoring enabled')
+output prometheusEnabled bool = enablePrometheus
+
+@description('Grafana dashboard enabled')
+output grafanaEnabled bool = enableGrafana
+
+@description('Production user node pools enabled')
+output productionUserNodePoolsEnabled bool = enableProductionUserNodePools
+
+@description('Backup and DR preparation enabled')
+output backupPreparationEnabled bool = enableBackupPreparation
+
+@description('Custom policy initiatives enabled')
+output customPolicyInitiativesEnabled bool = enableCustomPolicyInitiatives
+
+@description('Backup storage account name (if enabled)')
+output backupStorageAccountName string = enableBackupPreparation ? backupStorageAccount.name : ''
+
+@description('SSL certificate enabled for Application Gateway')
+output sslCertificateEnabled bool = enableSslCertificate
+
+@description('SSH access to AKS nodes enabled')
+output sshAccessEnabled bool = enableSshAccess
+
+@description('DNS A record created')
+output dnsARecordCreated bool = enableDnsARecord && enableApplicationGateway && enableDnsZone
+
+@description('DNS A record FQDN (if created)')
+output dnsARecordFqdn string = enableDnsARecord && enableApplicationGateway && enableDnsZone && !empty(dnsZoneName)
+  ? '${dnsARecordName}.${dnsZoneName}'
+  : ''
+
+@description('cert-manager installed')
+output certManagerInstalled bool = enableCertManager && !empty(certManagerEmail)
+
+@description('Let\'s Encrypt environment')
+output letsEncryptEnvironment string = enableCertManager ? letsEncryptEnvironment : ''
+
 @description('Deployment Summary')
 output summary object = {
   template: 'AKS Infrastructure with Azure Verified Modules - Complete Edition'
@@ -1070,6 +1531,17 @@ output summary object = {
     privateEndpoints: enablePrivateEndpoints
     networkSecurityGroups: enableNetworkSecurityGroups
     sysLogCollection: enableSysLogCollection
+    azureDefender: enableAzureDefender
+    etcdEncryption: enableEtcdEncryption
+    prometheus: enablePrometheus
+    grafana: enableGrafana
+    productionUserNodePools: enableProductionUserNodePools
+    backupPreparation: enableBackupPreparation
+    customPolicyInitiatives: enableCustomPolicyInitiatives
+    sslCertificate: enableSslCertificate
+    sshAccess: enableSshAccess
+    dnsARecord: enableDnsARecord
+    certManager: enableCertManager
   }
   codeReduction: '70% fewer lines vs original template (700+ vs 1600+ lines)'
   benefits: [
@@ -1088,16 +1560,42 @@ output summary object = {
     securityEnhancements: enablePrivateEndpoints
       ? 'Private endpoints for ACR and Key Vault'
       : 'Network isolation available'
+    threatProtection: enableAzureDefender
+      ? 'Azure Defender for Containers enabled'
+      : 'Azure Defender available for threat protection'
+    etcdSecurity: enableEtcdEncryption ? 'etcd encrypted with Key Vault KMS' : 'Key Vault KMS encryption available'
     networkSecurity: enableNetworkSecurityGroups ? 'NSGs protecting all subnets' : 'Network security groups available'
     connectivityOptions: enableNatGateway
       ? 'Predictable outbound IP with NAT Gateway'
       : 'NAT Gateway available for predictable outbound'
     secureAccess: enableBastion ? 'Azure Bastion for secure VM access' : 'Azure Bastion available for secure access'
     monitoring: enableSysLogCollection ? 'Advanced SysLog collection enabled' : 'SysLog collection available'
+    observability: enablePrometheus && enableGrafana
+      ? 'Azure Managed Prometheus and Grafana enabled'
+      : 'Managed observability stack available'
+    workloadIsolation: enableProductionUserNodePools
+      ? 'Multiple user node pools for workload isolation'
+      : 'User node pools available for workload separation'
+    backupRecovery: enableBackupPreparation
+      ? 'Backup infrastructure prepared (Velero-ready)'
+      : 'Backup and DR tools can be configured'
+    customGovernance: enableCustomPolicyInitiatives
+      ? 'Custom policy initiatives applied'
+      : 'Custom policy support available'
     automation: enableAutomation
       ? 'AKS start/stop automation configured'
       : 'AKS automation available for cost optimization'
     eventIntegration: enableEventGrid ? 'Event Grid for AKS event monitoring' : 'Event Grid integration available'
+    sslTermination: enableSslCertificate
+      ? 'HTTPS with Key Vault certificate on Application Gateway'
+      : 'SSL certificate support available'
+    domainManagement: enableDnsARecord && enableDnsZone
+      ? 'DNS A record configured for Application Gateway'
+      : 'DNS integration available'
+    nodeAccess: enableSshAccess ? 'SSH access configured for AKS nodes' : 'SSH access can be enabled'
+    certificateAutomation: enableCertManager
+      ? 'cert-manager installed for Let\'s Encrypt automation'
+      : 'cert-manager available for automatic certificate management'
   }
   availableComponents: {
     dnsZone: 'Set enableDnsZone=true and provide dnsZoneName'
@@ -1112,6 +1610,13 @@ output summary object = {
     privateEndpoints: 'Set enablePrivateEndpoints=true for network isolation'
     networkSecurityGroups: 'Set enableNetworkSecurityGroups=true for subnet protection'
     sysLogCollection: 'Set enableSysLogCollection=true for advanced monitoring'
+    productionNodePools: 'Set enableProductionUserNodePools=true for workload isolation'
+    backupDR: 'Set enableBackupPreparation=true to prepare for Velero/backup tools'
+    customPolicies: 'Set enableCustomPolicyInitiatives=true and provide customPolicyInitiativeIds'
+    sslCertificates: 'Set enableSslCertificate=true with sslCertificateKeyVaultName for HTTPS'
+    sshAccess: 'Set enableSshAccess=true and provide sshPublicKey for node access'
+    dnsRecords: 'Set enableDnsARecord=true with dnsARecordName for custom domain'
+    certManager: 'Set enableCertManager=true with certManagerEmail for Let\'s Encrypt automation'
   }
 }
 
